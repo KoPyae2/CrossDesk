@@ -1,0 +1,504 @@
+/* CrossDesk. Dark by default: this is a utility window that sits next to real
+   work, and a white panel on a dark desktop is a flashbang.
+
+   Layout is one column — a nav strip, an optional banner, then a scrolling body
+   of cards. The wall canvas is the one element allowed to grow. */
+
+:root {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-2: #1c232c;
+  --line: #262e39;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #4c9aff;
+  --accent-dim: #1f3b5f;
+  --good: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  --radius: 10px;
+
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  /* A control panel, not a document: text selection on every label only gets in
+     the way of dragging. Inputs opt back in below. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+main.loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand > div {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.brand .muted {
+  font-size: 11px;
+}
+
+/* Two overlapping squares: the app's whole idea in 20 pixels. */
+.mark {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, var(--accent), #b26bff);
+  box-shadow: 6px 6px 0 -2px var(--accent-dim);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tabs button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 7px;
+}
+
+.tabs button.on {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.identity input {
+  width: 160px;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 18px;
+  background: #3d1d1c;
+  border-bottom: 1px solid #5e2b28;
+  color: #ffb4ae;
+  flex: 0 0 auto;
+}
+
+.banner span {
+  flex: 1;
+  user-select: text;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 20px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* The wall gets whatever height is going; everything else is content-sized. */
+.card.grow {
+  flex: 1 1 auto;
+  min-height: 260px;
+}
+
+.card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.card header > :last-child:not(h2) {
+  margin-left: auto;
+}
+
+.card p {
+  margin: 0;
+}
+
+.big {
+  font-size: 16px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.warn {
+  color: var(--warn);
+}
+
+/* The pairing code is meant to be read out loud across a room. */
+.code {
+  font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas,
+    monospace;
+  font-size: 30px;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+  user-select: text;
+}
+
+button,
+input {
+  font: inherit;
+  color: var(--text);
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 7px 13px;
+  outline: none;
+}
+
+button {
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+button:hover:not(:disabled) {
+  border-color: #3a4553;
+  background: #232c37;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible {
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06121f;
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: #6aabff;
+  border-color: #6aabff;
+}
+
+button.danger {
+  color: #ff9d95;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #3d1d1c;
+  border-color: #5e2b28;
+}
+
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+button.ghost:hover {
+  color: var(--text);
+}
+
+input {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+input::placeholder {
+  color: #5b6674;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.pill.on {
+  color: var(--good);
+  border-color: #1d4429;
+  background: #12261a;
+}
+
+.pill.warn {
+  color: var(--warn);
+  border-color: #4a3a12;
+  background: #241d0d;
+}
+
+kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check input {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  padding: 0;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1 1 180px;
+}
+
+.peers,
+.hosts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.peers li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.peers li > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  line-height: 1.3;
+}
+
+/* Tabular figures so a changing latency does not shuffle the row. */
+.latency {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hosts button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+}
+
+.hosts button.picked {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.hosts .muted {
+  margin-right: auto;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin: 0;
+}
+
+.facts dt {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.facts dd {
+  margin: 0;
+}
+
+/* The wall. A dotted grid gives the drag something to read position against,
+   and every box is absolutely positioned from JS in scaled wall pixels. */
+.canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 200px;
+  border-radius: 10px;
+  background-color: var(--bg);
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 22px 22px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  /* Stops the WebView from turning a drag on the wall into a pan gesture. */
+  touch-action: none;
+}
+
+.device {
+  position: absolute;
+  border: 1px solid #3f4b5b;
+  border-radius: 6px;
+  background: #1b2431;
+  cursor: grab;
+  /* No transition: a drag has to track the pointer exactly, and interpolating
+     position would read as lag. */
+}
+
+.device.is-host {
+  border-color: var(--accent);
+  background: #16283d;
+  cursor: default;
+}
+
+.device.owner {
+  box-shadow: 0 0 0 2px var(--good);
+}
+
+.device.offline {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+.device.dragging {
+  cursor: grabbing;
+  z-index: 2;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+/* Real monitor rectangles inside the device's bounding box. */
+.monitor {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  pointer-events: none;
+}
+
+.device .tag,
+.device .res {
+  position: absolute;
+  left: 7px;
+  font-size: 11px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.device .tag {
+  top: 5px;
+  font-weight: 600;
+}
+
+.device .res {
+  bottom: 5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas .hint {
+  position: absolute;
+  bottom: 10px;
+  left: 0;
+  right: 0;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
