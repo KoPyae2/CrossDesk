@@ -115,8 +115,9 @@ pub struct Client {
 }
 
 impl Client {
-    /// Starts connecting. Failing to open an input backend is fatal: replaying
-    /// input is the entire job of this role.
+    /// Starts connecting. A platform with no input backend at all is fatal —
+    /// replaying input is the entire job of this role — but a backend the OS is
+    /// merely *refusing* is not: see [`spawn_injector`].
     pub fn start(
         settings: Settings,
         target: Target,
@@ -178,6 +179,12 @@ impl Drop for Client {
 /// The thread is what keeps replay off the async runtime: an input event is
 /// pulled straight out of the channel and handed to the OS, with no chance of
 /// waiting behind another task.
+///
+/// An `Injector` whose backend the OS is refusing still counts as ready. That is
+/// the macOS case: the user grants Accessibility while this window is open, and
+/// failing the connection here would mean they had to reconnect — or restart —
+/// to benefit from a grant made seconds ago. The injector reopens its backend on
+/// its own, and until it does the UI is the thing saying why nothing moves.
 fn spawn_injector() -> Result<UnboundedSender<InputEvent>, InjectError> {
     let (tx, mut rx) = unbounded_channel::<InputEvent>();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), InjectError>>();

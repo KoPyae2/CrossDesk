@@ -5,13 +5,32 @@
 //! virtual-key codes and scancodes because that is what its hooks report, so
 //! the translation into `enigo`'s portable key names happens here.
 
-use enigo::{Axis, Button as EButton, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
+use enigo::{
+    Axis, Button as EButton, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, NewConError,
+    Settings,
+};
 
 use super::InjectError;
 use crate::protocol::Button;
 
 /// One notch of a wheel, in the 1/120 units the protocol carries.
 const WHEEL_UNIT: i32 = 120;
+
+/// How every `Enigo` in this process is built.
+///
+/// The one setting that matters is `open_prompt_to_get_permissions: false`.
+/// enigo's default is to raise the macOS Accessibility dialog from
+/// `Enigo::new`, and this process constructs an `Enigo` for every `warp`, every
+/// cursor read and every retry of a refused backend — so the default turns one
+/// permission problem into a stream of system dialogs. Asking is a deliberate,
+/// user-initiated step instead (`permission::open_settings`), and the UI says
+/// what is wrong in the meantime.
+fn settings() -> Settings {
+    Settings {
+        open_prompt_to_get_permissions: false,
+        ..Settings::default()
+    }
+}
 
 pub struct Backend {
     enigo: Enigo,
@@ -23,8 +42,22 @@ pub struct Backend {
 
 impl Backend {
     pub fn new() -> Result<Self, InjectError> {
-        let enigo = Enigo::new(&Settings::default())
-            .map_err(|e| InjectError::Unavailable(e.to_string()))?;
+        let enigo = Enigo::new(&settings()).map_err(|e| match e {
+            // `Blocked`, not `Unavailable`: this is the failure a user hits after
+            // ticking the box in System Settings, and on macOS it is lifted
+            // *while the app runs*. Treating it as fatal would mean the client
+            // role refuses to start on the very machine the user is fixing, so
+            // they would have to restart CrossDesk to benefit from the grant they
+            // just made. Elsewhere it stays fatal and loud, because nothing in
+            // the UI would explain a client that silently moves nothing.
+            NewConError::NoPermission if cfg!(target_os = "macos") => InjectError::Blocked(
+                "macOS has not granted Accessibility permission to this copy of CrossDesk, so it \
+                 cannot replay the host's input yet. Use Grant permission on this screen — adding \
+                 the app by hand often grants it to a different build."
+                    .into(),
+            ),
+            other => InjectError::Unavailable(other.to_string()),
+        })?;
         Ok(Self {
             enigo,
             wheel_x: 0,
@@ -196,14 +229,14 @@ fn function_key(n: u16) -> Option<Key> {
     })
 }
 
-/// Only reachable if this platform ever gains a host role; a fresh connection
-/// per call is fine at the rate control changes hands.
+/// Only reachable if this platform ever gains a host role, plus the permission
+/// probe. A fresh connection per call is fine at the rate either happens.
 pub fn warp(x: i32, y: i32) {
-    if let Ok(mut enigo) = Enigo::new(&Settings::default()) {
+    if let Ok(mut enigo) = Enigo::new(&settings()) {
         let _ = enigo.move_mouse(x, y, Coordinate::Abs);
     }
 }
 
 pub fn cursor_position() -> Option<(i32, i32)> {
-    Enigo::new(&Settings::default()).ok()?.location().ok()
+    Enigo::new(&settings()).ok()?.location().ok()
 }

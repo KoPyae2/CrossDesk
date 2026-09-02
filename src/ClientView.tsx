@@ -6,7 +6,69 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Api, Found, Snapshot } from "./types";
+import type { Api, Found, Probe, Snapshot } from "./types";
+
+/** What macOS has to say about replaying input, and the two things that actually
+ *  resolve it.
+ *
+ *  Advisory, never blocking. `AXIsProcessTrusted` can report a grant that no
+ *  longer matches the running binary — a rebuilt unsigned build has a new code
+ *  signature and the ticked entry belongs to the old one — so a UI that refuses to
+ *  connect on its word leaves the user stuck with a permission they have visibly
+ *  granted. **Test pointer** posts a real movement and reads the position back,
+ *  which is the one answer the OS cannot get wrong. */
+function InputAccess({ snap, api }: { snap: Snapshot; api: Api }) {
+  const [probe, setProbe] = useState<Probe | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      setProbe(await invoke<Probe>("test_input"));
+    } catch (error) {
+      setProbe({ moved: false, access: snap.input_access, detail: String(error) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // A grant made in System Settings clears the warning on its own via the state
+  // tick, which also invalidates any earlier failed probe.
+  useEffect(() => {
+    setProbe(null);
+  }, [snap.input_access]);
+
+  if (snap.input_access === "not_needed") return null;
+
+  const granted = snap.input_access === "granted";
+  // The probe outranks the OS: movement is proof, and a granted claim that could
+  // not move is exactly the case this panel exists for.
+  const working = probe ? probe.moved : granted;
+
+  return (
+    <div className={working ? "notice" : "notice bad"}>
+      <p>
+        {probe
+          ? probe.detail
+          : granted
+            ? "macOS has granted Accessibility, so this machine can be driven by the host. If the pointer still does not move, press Test pointer — the grant may belong to an older build."
+            : "macOS has not granted CrossDesk the Accessibility permission, so it cannot move this machine's mouse or type on it. Press Grant permission, allow CrossDesk, then come back — this screen notices by itself."}
+      </p>
+      <div className="row">
+        <button onClick={() => void test()} disabled={testing}>
+          {testing ? "Testing…" : "Test pointer"}
+        </button>
+        <button
+          className={working ? "" : "primary"}
+          onClick={() => api.run("request_input_access")}
+          disabled={api.busy}
+        >
+          {granted ? "Open System Settings" : "Grant permission"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function ClientView({ snap, api }: { snap: Snapshot; api: Api }) {
   const [hosts, setHosts] = useState<Found[]>([]);
@@ -66,6 +128,7 @@ export function ClientView({ snap, api }: { snap: Snapshot; api: Api }) {
           ) : null}
         </dl>
         {connection.message ? <p className="warn">{connection.message}</p> : null}
+        <InputAccess snap={snap} api={api} />
         <div className="row">
           <button className="danger" onClick={() => api.run("stop")} disabled={api.busy}>
             Disconnect
@@ -124,6 +187,8 @@ export function ClientView({ snap, api }: { snap: Snapshot; api: Api }) {
             : "No hosts answered. Make sure the other machine is hosting and both are on the same WiFi, or type its address below."}
         </p>
       )}
+
+      <InputAccess snap={snap} api={api} />
 
       <form
         className="fields"

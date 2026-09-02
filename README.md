@@ -60,6 +60,26 @@ per device, including across reconnects and restarts.
 host from anywhere — it works even while every key is being suppressed, which is
 the point.
 
+### macOS clients need Accessibility
+
+macOS will not let any app move the pointer or type until it is on the
+Accessibility list, and it refuses in **silence** — the API that posts an event
+reports nothing, so a client without permission connects, looks connected, and
+moves nothing.
+
+Press **Grant permission** on the client panel. That does the part that actually
+matters: it asks macOS for access, which registers *this* copy of CrossDesk in
+the list, and then opens the pane so you can see it. Adding the app by hand with
+**+** is the usual way to end up with a permission that does nothing, because the
+path you pick may be a different build from the one that is running.
+
+If the panel says permission is granted but nothing moves, press **Test pointer**.
+It nudges the pointer and reads the position back, which is the only answer that
+cannot be wrong. A grant that fails that test belongs to an older build: remove
+CrossDesk from the list with **−**, press **Grant permission** again, and restart
+the app. The warning clears by itself once the permission is real — there is
+nothing to reconnect.
+
 ## Development
 
 ```sh
@@ -71,8 +91,8 @@ cd src-tauri && cargo test
 
 Requires the Rust toolchain and the [Tauri v2
 prerequisites](https://tauri.app/start/prerequisites/) for your platform. A client
-on Linux needs X11 (`XTEST`) to inject input; on macOS, grant the app
-Accessibility permission or injected input is silently dropped.
+on Linux needs X11 (`XTEST`) to inject input; on macOS, see the Accessibility
+section above.
 
 ## Ports
 

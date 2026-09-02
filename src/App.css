@@ -279,6 +279,36 @@ input::placeholder {
   color: #5b6674;
 }
 
+/* An inline notice inside a card: something to act on, not an error banner.
+   `.bad` is for the case that stops the app working at all. */
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+
+.notice p {
+  flex: 1 1 260px;
+  margin: 0;
+  font-size: 13px;
+  user-select: text;
+}
+
+.notice.bad {
+  border-color: #5e4a19;
+  background: #241d0d;
+  color: #f0d69a;
+}
+
+.notice .row {
+  margin-left: auto;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

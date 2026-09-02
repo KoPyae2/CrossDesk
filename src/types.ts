@@ -52,6 +52,18 @@ export interface Connection {
   attempts: number;
 }
 
+/** Whether the OS will let this machine replay the host's input. Only macOS
+ *  gates it; everywhere else it is `not_needed`. */
+export type InputAccess = "not_needed" | "granted" | "denied";
+
+/** Result of actually moving this machine's pointer — ground truth, for when the
+ *  OS claims a permission it is not honouring. */
+export interface Probe {
+  moved: boolean;
+  access: InputAccess;
+  detail: string;
+}
+
 export interface Snapshot {
   role: Role;
   device_name: string;
@@ -64,6 +76,7 @@ export interface Snapshot {
   /** False where this machine has no input-capture backend, so it can only be a
    *  client. Today that means anything other than Windows. */
   can_host: boolean;
+  input_access: InputAccess;
   displays: Display[];
   layout: LayoutView | null;
   peers: PeerView[];

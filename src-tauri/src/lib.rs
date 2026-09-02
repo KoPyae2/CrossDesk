@@ -17,6 +17,7 @@ mod displays;
 mod host;
 mod inject;
 mod layout;
+mod permission;
 mod protocol;
 mod settings;
 mod transport;
@@ -115,6 +116,10 @@ struct Snapshot {
     /// cannot be the one holding the keyboard, so the UI says so up front
     /// instead of failing when the button is pressed.
     can_host: bool,
+    /// Whether the OS will let this machine replay input at all. macOS gates it
+    /// behind Accessibility and refuses in silence, so the UI has to ask rather
+    /// than wait for an error that never comes.
+    input_access: permission::Access,
     /// This machine's own monitors, for the layout preview while idle.
     displays: Vec<Display>,
     /// Host role only.
@@ -190,6 +195,7 @@ fn snapshot(app: &App) -> Snapshot {
         clipboard_images: settings.clipboard_images,
         port: DEFAULT_PORT,
         can_host: capture::supported(),
+        input_access: permission::status(),
         displays: displays::enumerate(),
         layout,
         peers,
@@ -472,13 +478,64 @@ fn set_clipboard(
     snapshot(&app)
 }
 
+/// Asks the OS for permission to replay input, prompting if it has not been
+/// decided, and opens the pane where it is granted.
+///
+/// Both halves matter on macOS. The request is what registers *this* binary in
+/// the Accessibility list — ticking a hand-added entry grants permission to
+/// whichever copy that path points at, which is why a granted-looking CrossDesk
+/// can still be unable to move the pointer. Opening the pane is then just so the
+/// user can see the entry that appeared.
+#[tauri::command]
+async fn request_input_access(app: tauri::State<'_, Arc<App>>) -> Result<Snapshot, String> {
+    let app = app.inner().clone();
+    // Opening System Settings shells out, so keep it off the UI thread.
+    let opened = tauri::async_runtime::spawn_blocking(permission::open_settings)
+        .await
+        .map_err(|e| e.to_string())?;
+    app.mark_dirty();
+    match opened {
+        Ok(()) => Ok(snapshot(&app)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Moves this machine's own pointer and reports whether it actually moved.
+///
+/// The only honest answer available on macOS: `CGEventPost` reports nothing, and
+/// the Accessibility list can claim a grant that no longer matches this build. A
+/// pointer that visibly moves settles it either way.
+#[tauri::command]
+async fn test_input(app: tauri::State<'_, Arc<App>>) -> Result<permission::Probe, String> {
+    let app = app.inner().clone();
+    let probe = tauri::async_runtime::spawn_blocking(permission::probe)
+        .await
+        .map_err(|e| e.to_string())?;
+    app.mark_dirty();
+    Ok(probe)
+}
+
 /// The UI's clock. One event per tick, and only when something actually changed,
 /// so the frontend re-renders at a human rate no matter how fast input arrives.
 fn spawn_ui_tick(handle: tauri::AppHandle, app: Arc<App>) {
     tauri::async_runtime::spawn(async move {
         let mut ticker = tokio::time::interval(UI_TICK);
+        // Nothing marks the state dirty when the *user* grants Accessibility in
+        // System Settings — it happens entirely outside this process. So the one
+        // piece of state that can change without us is polled here, which is what
+        // lets the warning clear by itself rather than needing a button. Two C
+        // calls reading process state, four times a second, and not even that off
+        // macOS: `NotNeeded` can never change.
+        let mut access = permission::status();
         loop {
             ticker.tick().await;
+            if access != permission::Access::NotNeeded {
+                let now = permission::status();
+                if now != access {
+                    access = now;
+                    app.mark_dirty();
+                }
+            }
             // `swap` rather than load-then-clear: a state change that lands
             // between the two would otherwise be dropped.
             if !app.dirty.swap(false, Ordering::Relaxed) {
@@ -531,6 +588,8 @@ pub fn run() {
             regenerate_code,
             set_accepting,
             set_clipboard,
+            request_input_access,
+            test_input,
         ])
         .run(tauri::generate_context!())
         .expect("error while running CrossDesk");
