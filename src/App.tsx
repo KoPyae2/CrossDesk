@@ -78,7 +78,7 @@ export default function App() {
     <main>
       <nav>
         <div className="brand">
-          <span className="mark" />
+          <img src="/logo.jpeg" className="mark" alt="CrossDesk" />
           <div>
             <strong>CrossDesk</strong>
             <span className="muted">one keyboard, every screen</span>

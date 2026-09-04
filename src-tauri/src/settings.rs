@@ -65,7 +65,12 @@ impl Settings {
         // A settings file we cannot parse is more likely a half-written file
         // than a real problem; starting fresh beats refusing to launch.
         match serde_json::from_str::<Settings>(&text) {
-            Ok(settings) => settings,
+            Ok(mut settings) => {
+                // Ensure clipboard_images is enabled so existing configurations seamlessly
+                // support copying and pasting images across devices.
+                settings.clipboard_images = true;
+                settings
+            }
             Err(_) => {
                 let fresh = Self::default();
                 fresh.save();

@@ -1,187 +1,104 @@
-//! Native macOS input injection via CoreGraphics.
+//! Native macOS input injection.
 //!
-//! Replaces the portable `enigo` layer on macOS:
-//! 1. Posts keyboard events to `kCGSessionEventTap`, which routes properly to the
-//!    focused application (whereas `kCGHIDEventTap` silently drops keyboard events
-//!    for non-root processes in modern macOS).
-//! 2. Maps Windows virtual key codes directly to macOS `CGKeyCode`s without
-//!    slow runtime layout queries that fail on non-main threads.
-//! 3. Correctly preserves and applies modifier flags (Shift, Command, Option, Control)
-//!    and sets Unicode string representation for printable characters.
+//! - Mouse movement, clicks, scrolling, and cursor queries go through `enigo`,
+//!   which properly computes mouse deltas and strictly enforces macOS
+//!   Accessibility permissions (so `probe` accurately reflects whether
+//!   permission is granted).
+//! - Keyboard events bypass `enigo`'s buggy HID-tap implementation and instead
+//!   post directly to `kCGSessionEventTap` via CoreGraphics with explicit
+//!   modifier tracking and unicode string support.
 
 use core_graphics::event::{
-    CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
-    ScrollEventUnit,
+    CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode,
 };
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use core_graphics::geometry::CGPoint;
+use enigo::{
+    Axis, Button as EButton, Coordinate, Direction, Enigo, Mouse, NewConError, Settings,
+};
 
 use super::InjectError;
-use crate::permission::{self, Access};
 use crate::protocol::Button;
 
-// Modifier flag masks for CoreGraphics events
+// Modifier flag masks for CoreGraphics keyboard events
 const MASK_SHIFT: u64 = 0x0002_0000;
 const MASK_CONTROL: u64 = 0x0004_0000;
 const MASK_OPTION: u64 = 0x0008_0000;
 const MASK_COMMAND: u64 = 0x0010_0000;
 
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGWarpMouseCursorPosition(newCursorPosition: CGPoint) -> i32;
+fn settings() -> Settings {
+    Settings {
+        open_prompt_to_get_permissions: false,
+        ..Settings::default()
+    }
 }
 
 pub struct Backend {
+    enigo: Enigo,
     source: CGEventSource,
-    cursor: CGPoint,
     active_flags: u64,
-    left_down: bool,
-    right_down: bool,
-    other_down: bool,
     wheel_x: i32,
     wheel_y: i32,
 }
 
 impl Backend {
     pub fn new() -> Result<Self, InjectError> {
-        if permission::status() == Access::Denied {
-            return Err(InjectError::Blocked(
+        let enigo = Enigo::new(&settings()).map_err(|e| match e {
+            NewConError::NoPermission => InjectError::Blocked(
                 "macOS has not granted Accessibility permission to this copy of CrossDesk, so it \
                  cannot replay the host's input yet. Use Grant permission on this screen — adding \
                  the app by hand often grants it to a different build."
                     .into(),
-            ));
-        }
+            ),
+            other => InjectError::Unavailable(other.to_string()),
+        })?;
 
         let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
             .map_err(|_| InjectError::Unavailable("failed to create CGEventSource".into()))?;
 
-        let cursor = cursor_location().unwrap_or(CGPoint::new(0.0, 0.0));
-
         Ok(Self {
+            enigo,
             source,
-            cursor,
             active_flags: 0,
-            left_down: false,
-            right_down: false,
-            other_down: false,
             wheel_x: 0,
             wheel_y: 0,
         })
     }
 
     pub fn move_abs(&mut self, x: i32, y: i32) {
-        self.cursor = CGPoint::new(x as f64, y as f64);
-        let event_type = if self.left_down {
-            CGEventType::LeftMouseDragged
-        } else if self.right_down {
-            CGEventType::RightMouseDragged
-        } else if self.other_down {
-            CGEventType::OtherMouseDragged
-        } else {
-            CGEventType::MouseMoved
-        };
-
-        let button = if self.right_down {
-            CGMouseButton::Right
-        } else if self.other_down {
-            CGMouseButton::Center
-        } else {
-            CGMouseButton::Left
-        };
-
-        if let Ok(event) = CGEvent::new_mouse_event(self.source.clone(), event_type, self.cursor, button) {
-            if self.active_flags != 0 {
-                event.set_flags(CGEventFlags::from_bits_truncate(self.active_flags));
-            }
-            event.post(CGEventTapLocation::HID);
-        }
+        let _ = self.enigo.move_mouse(x, y, Coordinate::Abs);
     }
 
     pub fn button(&mut self, button: Button, down: bool) {
-        let (event_type, cg_button, button_num) = match button {
-            Button::Left => {
-                self.left_down = down;
-                (
-                    if down { CGEventType::LeftMouseDown } else { CGEventType::LeftMouseUp },
-                    CGMouseButton::Left,
-                    0,
-                )
-            }
-            Button::Right => {
-                self.right_down = down;
-                (
-                    if down { CGEventType::RightMouseDown } else { CGEventType::RightMouseUp },
-                    CGMouseButton::Right,
-                    1,
-                )
-            }
-            Button::Middle => {
-                self.other_down = down;
-                (
-                    if down { CGEventType::OtherMouseDown } else { CGEventType::OtherMouseUp },
-                    CGMouseButton::Center,
-                    2,
-                )
-            }
-            Button::Back => {
-                self.other_down = down;
-                (
-                    if down { CGEventType::OtherMouseDown } else { CGEventType::OtherMouseUp },
-                    CGMouseButton::Center,
-                    3,
-                )
-            }
-            Button::Forward => {
-                self.other_down = down;
-                (
-                    if down { CGEventType::OtherMouseDown } else { CGEventType::OtherMouseUp },
-                    CGMouseButton::Center,
-                    4,
-                )
-            }
+        let button = match button {
+            Button::Left => EButton::Left,
+            Button::Right => EButton::Right,
+            Button::Middle => EButton::Middle,
+            Button::Back => EButton::Back,
+            Button::Forward => EButton::Forward,
         };
-
-        if let Ok(event) = CGEvent::new_mouse_event(self.source.clone(), event_type, self.cursor, cg_button) {
-            if button_num >= 2 {
-                event.set_integer_value_field(
-                    core_graphics::event::EventField::MOUSE_EVENT_BUTTON_NUMBER,
-                    button_num,
-                );
-            }
-            if self.active_flags != 0 {
-                event.set_flags(CGEventFlags::from_bits_truncate(self.active_flags));
-            }
-            event.post(CGEventTapLocation::HID);
-        }
+        let dir = if down {
+            Direction::Press
+        } else {
+            Direction::Release
+        };
+        let _ = self.enigo.button(button, dir);
     }
 
     pub fn wheel(&mut self, dx: i16, dy: i16) {
-        // Windows reports wheel in 1/120 notch units.
-        // Scroll with Pixel units for high precision.
         self.wheel_y += dy as i32;
         self.wheel_x += dx as i32;
 
-        let py = self.wheel_y / 10;
-        let px = self.wheel_x / 10;
+        let notches_y = self.wheel_y / 120;
+        if notches_y != 0 {
+            self.wheel_y -= notches_y * 120;
+            // Windows reports wheel-up as positive; enigo scrolls down on positive, so sign flips.
+            let _ = self.enigo.scroll(-notches_y, Axis::Vertical);
+        }
 
-        if py != 0 || px != 0 {
-            self.wheel_y -= py * 10;
-            self.wheel_x -= px * 10;
-
-            if let Ok(event) = CGEvent::new_scroll_event(
-                self.source.clone(),
-                ScrollEventUnit::PIXEL,
-                2,
-                py,
-                px,
-                0,
-            ) {
-                if self.active_flags != 0 {
-                    event.set_flags(CGEventFlags::from_bits_truncate(self.active_flags));
-                }
-                event.post(CGEventTapLocation::HID);
-            }
+        let notches_x = self.wheel_x / 120;
+        if notches_x != 0 {
+            self.wheel_x -= notches_x * 120;
+            let _ = self.enigo.scroll(notches_x, Axis::Horizontal);
         }
     }
 
@@ -222,7 +139,6 @@ impl Backend {
 
             // Post to Session tap so it is delivered to the currently focused application
             event.post(CGEventTapLocation::Session);
-            event.post(CGEventTapLocation::AnnotatedSession);
         }
     }
 
@@ -240,20 +156,13 @@ impl Backend {
 }
 
 pub fn warp(x: i32, y: i32) {
-    let pt = CGPoint::new(x as f64, y as f64);
-    unsafe {
-        CGWarpMouseCursorPosition(pt);
+    if let Ok(mut enigo) = Enigo::new(&settings()) {
+        let _ = enigo.move_mouse(x, y, Coordinate::Abs);
     }
 }
 
 pub fn cursor_position() -> Option<(i32, i32)> {
-    cursor_location().map(|p| (p.x as i32, p.y as i32))
-}
-
-fn cursor_location() -> Option<CGPoint> {
-    let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState).ok()?;
-    let event = CGEvent::new(source).ok()?;
-    Some(event.location())
+    Enigo::new(&settings()).ok()?.location().ok()
 }
 
 /// Translates Windows virtual-key codes and scancodes to macOS `CGKeyCode`

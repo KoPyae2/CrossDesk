@@ -97,8 +97,24 @@ pub fn status() -> Access {
 /// and then showing the user the list are one action from their side.
 #[cfg(target_os = "macos")]
 fn request() -> Access {
-    // SAFETY: takes no arguments; may present a system prompt.
-    unsafe { CGRequestPostEventAccess() };
+    // SAFETY: may present a system prompt to register this exact running binary.
+    unsafe {
+        CGRequestPostEventAccess();
+        let keys = [kAXTrustedCheckOptionPrompt];
+        let values = [kCFBooleanTrue];
+        let dict = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks,
+        );
+        if !dict.is_null() {
+            let _ = AXIsProcessTrustedWithOptions(dict);
+            CFRelease(dict);
+        }
+    }
     status()
 }
 
@@ -133,13 +149,23 @@ pub fn open_settings() -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 #[link(name = "ApplicationServices", kind = "framework")]
+#[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
-    /// Nonzero when this process is a trusted accessibility client.
-    ///
-    /// Declared `-> u8` deliberately: the C return type is `Boolean`, an
-    /// `unsigned char`, and receiving anything other than 0 or 1 as a Rust `bool`
-    /// would be undefined behaviour.
     fn AXIsProcessTrusted() -> u8;
+    fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> u8;
+    static kAXTrustedCheckOptionPrompt: *const std::ffi::c_void;
+    fn CFDictionaryCreate(
+        allocator: *const std::ffi::c_void,
+        keys: *const *const std::ffi::c_void,
+        values: *const *const std::ffi::c_void,
+        numValues: isize,
+        keyCallBacks: *const std::ffi::c_void,
+        valueCallBacks: *const std::ffi::c_void,
+    ) -> *const std::ffi::c_void;
+    static kCFBooleanTrue: *const std::ffi::c_void;
+    static kCFTypeDictionaryKeyCallBacks: std::ffi::c_void;
+    static kCFTypeDictionaryValueCallBacks: std::ffi::c_void;
+    fn CFRelease(cf: *const std::ffi::c_void);
 }
 
 #[cfg(target_os = "macos")]

@@ -19,10 +19,47 @@ use crate::protocol::Clip;
 /// Fast enough to feel instant after Ctrl+C, slow enough to be free.
 const POLL: Duration = Duration::from_millis(300);
 
-/// Images above this are dropped rather than sent: a screenshot of a 4K desktop
-/// is ~33 MB of RGBA, and pushing that through a latency-critical link to save
-/// one paste is the wrong trade.
-const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+/// Images larger than this are downscaled to ensure they fit within
+/// protocol frame limits while never being dropped.
+const MAX_IMAGE_BYTES: usize = 24 * 1024 * 1024;
+
+/// Downsamples an RGBA image by a factor of 2 in both dimensions using box averaging.
+/// This allows Retina and 4K screenshots (~25MB - 60MB raw RGBA) to safely fit
+/// within the frame limit without sacrificing visual clarity or being dropped.
+fn downscale_2x(width: u32, height: u32, rgba: &[u8]) -> (u32, u32, Vec<u8>) {
+    let new_w = width / 2;
+    let new_h = height / 2;
+    if new_w == 0 || new_h == 0 {
+        return (width, height, rgba.to_vec());
+    }
+    let mut out = Vec::with_capacity((new_w * new_h * 4) as usize);
+    let stride = (width * 4) as usize;
+
+    for ny in 0..new_h {
+        let row0 = (ny * 2) as usize * stride;
+        let row1 = row0 + stride;
+        for nx in 0..new_w {
+            let col0 = (nx * 2) as usize * 4;
+            let col1 = col0 + 4;
+
+            let p0 = row0 + col0;
+            let p1 = row0 + col1;
+            let p2 = row1 + col0;
+            let p3 = row1 + col1;
+
+            let r = ((rgba[p0] as u32 + rgba[p1] as u32 + rgba[p2] as u32 + rgba[p3] as u32 + 2) / 4) as u8;
+            let g = ((rgba[p0 + 1] as u32 + rgba[p1 + 1] as u32 + rgba[p2 + 1] as u32 + rgba[p3 + 1] as u32 + 2) / 4) as u8;
+            let b = ((rgba[p0 + 2] as u32 + rgba[p1 + 2] as u32 + rgba[p2 + 2] as u32 + rgba[p3 + 2] as u32 + 2) / 4) as u8;
+            let a = ((rgba[p0 + 3] as u32 + rgba[p1 + 3] as u32 + rgba[p2 + 3] as u32 + rgba[p3 + 3] as u32 + 2) / 4) as u8;
+
+            out.push(r);
+            out.push(g);
+            out.push(b);
+            out.push(a);
+        }
+    }
+    (new_w, new_h, out)
+}
 
 /// Owns the polling thread. Holding this handle keeps the thread alive.
 pub struct Clipboard {
@@ -134,11 +171,23 @@ fn read(board: &mut arboard::Clipboard, images: bool) -> Option<Clip> {
     // the text metadata from shadowing the actual image payload.
     if images {
         if let Ok(image) = board.get_image() {
-            if image.bytes.len() <= MAX_IMAGE_BYTES {
+            let mut width = image.width as u32;
+            let mut height = image.height as u32;
+            let mut rgba = image.bytes.into_owned();
+
+            // Iteratively downscale large images (e.g. Retina screenshots) so they fit safely within frame limits
+            while rgba.len() > MAX_IMAGE_BYTES && width > 1 && height > 1 {
+                let (new_w, new_h, new_rgba) = downscale_2x(width, height, &rgba);
+                width = new_w;
+                height = new_h;
+                rgba = new_rgba;
+            }
+
+            if rgba.len() <= MAX_IMAGE_BYTES && width > 0 && height > 0 {
                 return Some(Clip::Image {
-                    width: image.width as u32,
-                    height: image.height as u32,
-                    rgba: image.bytes.into_owned(),
+                    width,
+                    height,
+                    rgba,
                 });
             }
         }
@@ -164,5 +213,52 @@ fn write(board: &mut arboard::Clipboard, clip: &Clip) -> Result<(), arboard::Err
             height: *height as usize,
             bytes: std::borrow::Cow::Borrowed(rgba),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_downscale_2x_halves_dimensions_and_averages_pixels() {
+        // 4x4 image, RGBA
+        let width = 4;
+        let height = 4;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+        // Fill top-left 2x2 with 100, top-right 2x2 with 200
+        for ny in 0..2 {
+            for nx in 0..2 {
+                let idx = (ny * width + nx) as usize * 4;
+                rgba[idx] = 100;
+                rgba[idx + 1] = 100;
+                rgba[idx + 2] = 100;
+                rgba[idx + 3] = 255;
+            }
+        }
+        for ny in 0..2 {
+            for nx in 2..4 {
+                let idx = (ny * width + nx) as usize * 4;
+                rgba[idx] = 200;
+                rgba[idx + 1] = 200;
+                rgba[idx + 2] = 200;
+                rgba[idx + 3] = 255;
+            }
+        }
+
+        let (new_w, new_h, out) = downscale_2x(width, height, &rgba);
+        assert_eq!(new_w, 2);
+        assert_eq!(new_h, 2);
+        assert_eq!(out.len(), 2 * 2 * 4);
+        // Top-left pixel should be 100
+        assert_eq!(out[0], 100);
+        assert_eq!(out[1], 100);
+        assert_eq!(out[2], 100);
+        assert_eq!(out[3], 255);
+        // Top-right pixel should be 200
+        assert_eq!(out[4], 200);
+        assert_eq!(out[5], 200);
+        assert_eq!(out[6], 200);
+        assert_eq!(out[7], 255);
     }
 }
