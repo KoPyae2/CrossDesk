@@ -128,13 +128,10 @@ fn fingerprint_of(clip: &Clip) -> Fingerprint {
 }
 
 fn read(board: &mut arboard::Clipboard, images: bool) -> Option<Clip> {
-    // Text first: it is the overwhelmingly common case and much cheaper. An
-    // image-only clipboard makes get_text fail, which is how we fall through.
-    if let Ok(text) = board.get_text() {
-        if !text.is_empty() {
-            return Some(Clip::Text(text));
-        }
-    }
+    // When images are enabled, check for image data first. On macOS and in
+    // modern browsers, copying an image or screenshot often places both an image
+    // bitmap and a textual title/URL on the pasteboard. Checking image first prevents
+    // the text metadata from shadowing the actual image payload.
     if images {
         if let Ok(image) = board.get_image() {
             if image.bytes.len() <= MAX_IMAGE_BYTES {
@@ -144,6 +141,12 @@ fn read(board: &mut arboard::Clipboard, images: bool) -> Option<Clip> {
                     rgba: image.bytes.into_owned(),
                 });
             }
+        }
+    }
+    // Plain text: read whenever there is no image (or when images are disabled).
+    if let Ok(text) = board.get_text() {
+        if !text.is_empty() {
+            return Some(Clip::Text(text));
         }
     }
     None

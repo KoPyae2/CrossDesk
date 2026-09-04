@@ -52,9 +52,13 @@ features = [
   "Win32_UI_WindowsAndMessaging",
 ]
 
-# Non-Windows platforms use enigo for input injection (client role).
+# Non-Windows platforms use enigo or native CoreGraphics for input injection (client role).
 [target.'cfg(not(windows))'.dependencies]
 enigo = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25"
+core-foundation = "0.10"
 
 [profile.release]
 # input latency benefits far more from optimisation than from build speed

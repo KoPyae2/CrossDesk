@@ -44,7 +44,7 @@ impl Default for Settings {
             device_name: hostname(),
             pairing_code: random_pairing_code(),
             clipboard_sync: true,
-            clipboard_images: false,
+            clipboard_images: true,
             paired_hosts: HashMap::new(),
             paired_clients: HashMap::new(),
             layout: HashMap::new(),

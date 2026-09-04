@@ -38,9 +38,14 @@ mod win;
 #[cfg(windows)]
 use win as sys;
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos as sys;
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 mod other;
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 use other as sys;
 
 /// Replays remote input on this machine.

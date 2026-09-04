@@ -118,7 +118,13 @@ export function ClientView({ snap, api }: { snap: Snapshot; api: Api }) {
           </div>
           <div>
             <dt>Clipboard</dt>
-            <dd>{snap.clipboard_sync ? "shared" : "off"}</dd>
+            <dd>
+              {snap.clipboard_sync
+                ? snap.clipboard_images
+                  ? "text & images"
+                  : "text only"
+                : "off"}
+            </dd>
           </div>
           {connection.attempts > 0 ? (
             <div>
